@@ -31,41 +31,20 @@ class Sample(object):
 
     def photoCropAndAdjust(self):
         self.furtherCrop(self.croppedFilePath)
-        self.correctedImg = self.holeFill(self.correctedFilePath)
-        plt.subplot(1, 2, 1)
+        correctedImg = self.holeFill(self.correctedFilePath)
+        self.correctedImg = self.removeGradient(correctedImg)
+        correctedImg = self.correctedImg
+        """plt.subplot(1, 2, 1)
         plt.title("Image of Sample")
         plt.imshow(self.correctedImg)
-        self.pltImgShow()
+        plt.show()"""
+        return correctedImg
 
-
-
-    def GetHist(self):
-        self.damageInfo = self.getDamageInfo(self.correctedImg)
-        self.damagedSample = self.damageInfo[2]
-        self.coupon = self.damageInfo[1]
-        #print(self.coupon)
-        if self.damagedSample: #if sample has damage
-            histData = self.getHistogram(self.damageInfo[1],damagedSample=True,plotted=False)
-            histData = histData[1:,:254]
-            print(histData, "hist data for peak finding")
-            # Find peaks with prominence
-            self.peaks, peak_props = find_peaks(histData[:,1]) 
-            self.troughs, trough_props = find_peaks(-histData[:,1])
-            #print(peak_props, "peak props")
-            self.troughs = np.append([1], self.troughs)
-            self.troughs = np.append(self.troughs,[250])
-            #print(self.peaks, "peaks", self.troughs, "troughs")
-            plt.plot(histData)
-            plt.plot(self.peaks, histData[self.peaks])
-            plt.plot(self.troughs, histData[self.troughs])
-            plt.title("Detected Peaks and Troughs")
-            self.pltImgShow()
-            self.histData = histData
-            #print(self.histData)
-        else:
-            self.histData = None
-            self.peaks = [0]
-            self.troughs = [0,0]
+    def removeGradient(self,img):
+        blur = cv2.GaussianBlur(img,(21,21),101)
+        clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(16,16))
+        corrected = clahe.apply(blur)
+        return corrected
     
     def holeFill(self,imgPath):
         threshold = 170
@@ -94,7 +73,6 @@ class Sample(object):
         
         threshold = 170
         img = cv2.imread(imgPath)
-        img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
         imgray = cv2.cvtColor(img, cv2.COLOR_RGB2GRAY)
         if self.doSaveImg:
             plt.imshow(img)
@@ -216,124 +194,32 @@ class Sample(object):
         image_contours1 = cv2.drawContours(img.copy(), contours1[maxContourLengthIndex], -1, (0,255,0), 10, cv2.LINE_AA)
         return contours1, maxContourLengthIndex, contour
 
+    def getDamageThresholdValue(self,img):
 
-    def getDamageInfo(self,imgray):
-        hasDamage = True
-        plt.subplot(1, 3, 1)
-        plt.imshow(imgray)
-        damageHistogram = item.getHistogram(imgray, plotted=True)
-        maxFreqIndex = np.argmax(damageHistogram[:,1])
-        for x in range(maxFreqIndex,255):
-            if damageHistogram[x,1] != 0:
-                pass
-            else:
-                first0ValueIndex = x
-                #input(str(first0ValueIndex) + " " + str(maxFreqIndex))
-                break
-        plt.subplot(1,2,1)
-        plt.bar(damageHistogram[1:,0], damageHistogram[1:,1]) # x axis: intensity, y axis: freq
-        delta = abs(first0ValueIndex - maxFreqIndex)
-        damageHistogram[maxFreqIndex-delta:maxFreqIndex,1] = 0
-        damageHistogram[maxFreqIndex:first0ValueIndex,1] = 0
-        self.damageThresholdValue = np.argmax(damageHistogram[:,1])
-        damageThresholdValue = self.damageThresholdValue
-        for value in range(np.argmax(damageHistogram[:,1]),255):
-            if damageHistogram[value,1] == 0:
-                damageThresholdValue = value
-                break
-        plt.subplot(1,2,2)
-        plt.bar(damageHistogram[1:,0], damageHistogram[1:,1]) # x axis: intensity, y axis: freq
-        plt.title("Histogram of pixel intensity changed(damaged) \n "+self.filePath)
-        plt.show()
-        print("Damage Threshold Value:", damageThresholdValue)
-        self.damageThresholdValue = damageThresholdValue
-        mask = (imgray >= damageThresholdValue)
-        thresholedImage = imgray.copy()
-        thresholedImage[mask] = 0
-        plt.subplot(1, 3, 2)
-        plt.imshow(thresholedImage)
-        plt.subplot(1, 3, 3)
-        plt.imshow(thresholedImage)
-        plt.show()
-        """ plt.imshow(thresholedImage)
-        plt.title("Thresholded Image for Damage Detection")
-        self.pltImgShow()"""
-        self.histData = self.getHistogram(thresholedImage,damagedSample=hasDamage, plotted = False)
+
+        edges = cv2.Canny(img, 100, 200)
         
-        damage = self.histData[0:int(damageThresholdValue)]
-        totalDamageArea = sum(damage[:,1])
-        if totalDamageArea > self.newHeight*self.newWidth*0.999: #if "damages area" is more than 90% of total area --> not damaged
-            print(file, ": Not picking up damage")
-            #thresholdValue,thresholedImage = cv2.threshold(imgray,0,254,cv2.THRESH_TOZERO)
-            hasDamage = False
-        else:
-            print(file, ": Damage detected", totalDamageArea/(self.newHeight*self.newWidth)*100)
-        return damageThresholdValue, thresholedImage, hasDamage
-    
-    def getAllDelaminations(self):
-        for x in range(0,len(self.peaks)):
-            self.delaminationLayer(x)
-            if self.damagedSample == False:
-                print("No delaminations to process for undamaged sample:", self.filePath)
-                mask = (self.coupon <= 254/2)
-                self.coupon[mask] = 0
-                mask = (self.coupon > 254/2)
-                self.coupon[mask] = 255
-                
-        self.showImg()
-
-
-    def delaminationLayer(self,layerOverlapNo):
-        if self.damagedSample:
-            #print(layerOverlapNo, "layer height")
-            #print(self.troughs, "troughs")
-            #print(self.peaks, "peaks list")
-            self.lowerThres = self.troughs[layerOverlapNo]
-            self.upperThres = self.troughs[layerOverlapNo+1]
-            #print(self.lowerThres, "LT", self.upperThres, "UT")
-            #print(self.peaks[layerOverlapNo], "peak")
-            mask = (self.coupon <= self.upperThres) & (self.coupon >= self.lowerThres)
-            #print(mask, "mask")
-            self.coupon[mask] = self.peaks[layerOverlapNo]
-        else:
-            self.coupon = self.coupon
-            #print("none damaged sample:",self.filePath )
-
-    def showImg(self):
-        plt.subplot(2, 2, 1)
-        self.data = self.getHistogram(self.coupon,plotted=False,damagedSample=self.damagedSample)
-        plt.bar(self.data[1:,0], self.data[1:,1])
-        plt.subplot(2, 2, 2)
-        plt.imshow(self.coupon)
-        if self.doSaveImg:
-                #print("saving histogram")
-                plt.savefig("reportImg/Histogram"+self.file+".jpeg")
-        self.pltImgShow()
-    
-
-    def getHistogram(self,data,damagedSample=True,plotted=False):
-        histogram, bin_edges = np.histogram(data, bins=256, range=(0, 255))
-        data = []
-        for index, x in enumerate(histogram):
-            data.append([index,histogram[index]]) 
+        #thresholdValue, thresholdedImage = cv2.threshold(img,120,255,cv2.THRESH_BINARY+cv2.THRESH_OTSU)
         
-        data = np.array(data)
-        #print(data, "histogram data")
+        contours, hierarchy = cv2.findContours(edges, cv2.RETR_LIST, cv2.CHAIN_APPROX_SIMPLE)
         
-        if plotted and self.doShowImg:
-            if damagedSample:
-                
-                plt.bar(data[1:,0], data[1:,1]) # x axis: intensity, y axis: freq
-                plt.title("Histogram of pixel intensity (damaged) \n "+self.filePath)
-                plt.show()
-            else:
-                #plt.bar(data[0:,0], data[0:,1])
-                plt.bar(data[1:,0], data[1:,1]) # x axis: intensity, y axis: freq
-                plt.title("Histogram of pixel intensity (undamaged) \n"+self.filePath)
-                plt.show()
+        contourImg = cv2.drawContours(img.copy(), contours, -1, (0, 0, 255), 10)
             
-        return data
-    
+        #parentOnly = cv2.drawContours(img.copy(), contours, -1, (0, 255, 0), 2)
+        plt.subplot(1,2,1)
+        plt.imshow(contourImg)
+        plt.subplot(1,2,2)
+        
+        plt.imshow(img)
+
+        #plt.imshow(contImg)        
+        plt.show()
+        input()
+
+        
+
+
+
     def pltImgShow(self):
         if self.doShowImg:
             plt.show()
@@ -364,11 +250,12 @@ files = os.listdir(path)
 print(files)
 
 # files of intrest 
-filenames = ["MA1","MA2","MA3","MA4","MA5",
+filenames = ["MA2","MA3","MA4","MA5",
              "AS1","AS2","AS3","AS4","AS5",
              "TB1","TB2","TB3","TB4","TB5",
-             "ZA1","ZA2","ZA3","ZA4","ZA5"]
-suffix = ["Front","Back"]
+             "ZA1","ZA2","ZA3","ZA4","ZA5"] # "MA1
+#filenames = ["MA5"]
+suffix = ["Front"]
 filetype = ".jpeg"
 
 coupon = []
@@ -376,16 +263,15 @@ print("da")
 for file in filenames:
     print(file)
     front = Sample(file+" "+suffix[0]+filetype, mirrorNeeded=False)
-    back = Sample(file+" "+suffix[1]+filetype, mirrorNeeded=True)
-    coupon = [front, back]
+    #back = Sample(file+" "+suffix[1]+filetype, mirrorNeeded=True)
+    coupon = [front]#back]
     data = []
     thres = []
     for item in coupon:
-        item.photoCropAndAdjust()
-        data.append(item.getHistogram(item.correctedImg, plotted=True))
-        item.GetHist()
-        item.getAllDelaminations()
-        thres.append(item.damageThresholdValue)
+        correctImg = item.photoCropAndAdjust()
+
+        item.getDamageThresholdValue(correctImg)
+        
 
     #print(Fdata = front.data)
-    plotFrontVsBack(data[0], data[1],other = thres)
+    #plotFrontVsBack(data[0], data[1],other = thres)
