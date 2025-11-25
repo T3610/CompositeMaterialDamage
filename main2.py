@@ -3,6 +3,8 @@ from scipy.signal import find_peaks
 import cv2
 from matplotlib import pyplot as plt
 import os
+import pandas as pd
+from scipy import signal
 
 
 data = np.genfromtxt("test.csv",delimiter=",")
@@ -19,20 +21,19 @@ data = np.genfromtxt("test.csv",delimiter=",")
 # AS done, 
 # Need ZA5 Back, ZA2 Back
 class Sample(object):
-    def __init__(self,file,mirrorNeeded):
+    def __init__(self,filePath):
         self.doSaveImg = True
         self.doShowImg = False
-        self.file = file
-        self.croppedFilePath = "ImagesNew/" + file
-        self.correctedFilePath = "corrected/" + file
-        self.filePath = self.correctedFilePath
-        print(self.croppedFilePath, "filepath")
         
+        self.ImgFilePath = filePath
+        self.correctedFilePath = "corrected/" + filePath
 
     def photoCropAndAdjust(self):
-        self.furtherCrop(self.croppedFilePath)
-        correctedImg = self.holeFill(self.correctedFilePath)
-        self.correctedImg = self.removeGradient(correctedImg)
+        
+        img = self.furtherCrop(self.ImgFilePath)
+        self.correctedImg = self.holeFill(img)
+        #self.correctedImg = self.removeGradient(correctedImg)
+
         correctedImg = self.correctedImg
         """plt.subplot(1, 2, 1)
         plt.title("Image of Sample")
@@ -41,15 +42,15 @@ class Sample(object):
         return correctedImg
 
     def removeGradient(self,img):
-        blur = cv2.GaussianBlur(img,(21,21),101)
+        blur = cv2.GaussianBlur(img,(21,21),11)
         clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(16,16))
         corrected = clahe.apply(blur)
         return corrected
     
-    def holeFill(self,imgPath):
+    def holeFill(self,img):
         threshold = 170
-        img = cv2.imread(imgPath)
-        imgray = cv2.cvtColor(img, cv2.COLOR_RGB2GRAY)
+        imgray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+        #imgray = cv2.cvtColor(img, cv2.COLOR_RGB2GRAY)
         ret, thresh = cv2.threshold(imgray, threshold, 255,cv2.THRESH_BINARY) # scource, threshold value, max value,type
         contours, hierarchy = cv2.findContours(thresh, cv2.RETR_LIST, cv2.CHAIN_APPROX_SIMPLE)
         best_idx, best_contour, best_ellipse, best_score = self.getMostEpllipticalContour(contours, min_points=5, max_area=10000, min_area = 5000)
@@ -60,13 +61,9 @@ class Sample(object):
             
             # Set all pixels inside ellipse to 255 in the original image
             imgray[mask == 255] = 254
-            print(np.shape(imgray))
             #plt.imshow(imgray)
             cont = cv2.drawContours(imgray, [best_contour], 0, (255,255,255), 3)
-            if self.doSaveImg:
-                plt.imshow(imgray)
-                plt.title("Filled Hole using Ellipse Fit")
-                self.pltImgShow()
+            
         return imgray
         
     def furtherCrop(self,imgPath):
@@ -74,46 +71,70 @@ class Sample(object):
         threshold = 170
         img = cv2.imread(imgPath)
         imgray = cv2.cvtColor(img, cv2.COLOR_RGB2GRAY)
-        if self.doSaveImg:
-            plt.imshow(img)
-            plt.xlabel("Width (pixels)")
-            plt.ylabel("Height (pixels)")
-            plt.savefig("reportImg/Before_cropping"+self.file+".jpeg")
-            self.pltImgShow()
-        #self.pltImgShow()
+        
         ret, thresh = cv2.threshold(imgray, threshold, 255,cv2.THRESH_BINARY) # scource, threshold value, max value,type
-        contourInfo = self.getCoupnEdgeContours(img,thresh)
+        contourInfo = self.getCoupnEdgeContours(imgray,thresh)
         contoursEdge, maxContourLengthIndex, contour = contourInfo
         image_contours1 = cv2.drawContours(img.copy(), contoursEdge[maxContourLengthIndex], -1, (0,0,255), 30, cv2.LINE_AA)
-
-        if self.doSaveImg:
-            plt.imshow(image_contours1)
-            plt.savefig("reportImg/ContourPlot"+self.file+".jpeg")
-            self.pltImgShow()
 
         epsilon = 0.005*cv2.arcLength(contour,True)
         approx = cv2.approxPolyDP(contour,epsilon,True)
         simpCnt = cv2.drawContours(img.copy(), [approx], 0, (255,255,255), 3)
-        if self.doSaveImg:
-            plt.imshow(simpCnt)
-            plt.title("Simplified Contour using Ramer–Douglas–Peucker algorithm")
-            self.pltImgShow()
-
+        
+        pts = approx.reshape(-1, 2)
+        tlpts = []
+        minDistance = -1
+        for index, x in enumerate(pts):
+            distance = np.sqrt((pts[index,0]**2)+(pts[index,1]**2))
+            if distance < minDistance or minDistance == -1:
+                tlpts=x
+                minDistance = distance
+        
+        trpts = []
+        imgShape = np.shape(imgray)
+        minDistance = -1
+        for index, x in enumerate(pts):
+            distance = np.sqrt((pts[index,0]-imgShape[0])**2+(pts[index,1])**2)
+            if distance < minDistance or minDistance == -1:
+                trpts=x
+                minDistance = distance
+        
+        brpts = []
+        imgShape = np.shape(imgray)
+        minDistance = -1
+        for index, x in enumerate(pts):
+            distance = np.sqrt((pts[index,0]-imgShape[0])**2+(pts[index,1]-imgShape[1])**2)
+            if distance < minDistance or minDistance == -1:
+                brpts=x
+                minDistance = distance
+        
+        blpts = []
+        imgShape = np.shape(imgray)
+        minDistance = -1
+        for index, x in enumerate(pts):
+            distance = np.sqrt((pts[index,0])**2+(pts[index,1]-imgShape[1])**2)
+            if distance < minDistance or minDistance == -1:
+                blpts=x
+                minDistance = distance
+                
+        """plt.plot(tlpts[0],tlpts[1],marker="o", color = "blue")
+        plt.plot(trpts[0],trpts[1],marker="o",color = "orange")
+        plt.plot(brpts[0],brpts[1],marker="o",color = "yellow")
+        plt.show()"""
         self.newWidth = 2000
         self.newHeight = 1.45*self.newWidth
-        pointForTrans = np.float32([approx[0], approx[1], approx[2], approx[3]])
+        arrangedCorners = [tlpts,trpts,brpts,blpts]
+        pointForTrans = np.float32([arrangedCorners[0],arrangedCorners[1],arrangedCorners[2],arrangedCorners[3]])
         correctedPoints = np.float32([[0,0],[self.newWidth,0],[self.newWidth,self.newHeight],[0,self.newHeight]])
         transMatrix = cv2.getPerspectiveTransform(pointForTrans, correctedPoints)
         couponResult = cv2.warpPerspective(img, transMatrix, (self.newWidth, int(self.newHeight)))
         
-        if self.doSaveImg:
-            plt.imshow(couponResult)
-            plt.savefig("reportImg/corrected_perspective"+self.file+".jpeg")
-            self.pltImgShow()
+        
+        """plt.imshow(couponResult)
+        #plt.savefig("reportImg/corrected_perspective"+self.file+".jpeg")
+        plt.show()"""
 
-        imgName = imgPath.split("/")[-1]
-        newPath = "corrected/"+imgName
-        cv2.imwrite(newPath, couponResult)
+        return couponResult
 
     def getMostEpllipticalContour(self, contours, min_points=5, max_area=10000, min_area = 5000):
         """
@@ -200,33 +221,160 @@ class Sample(object):
         else:
             plt.clf()
 
+class Coupon(object):
+    def __init__(self,set,ID):
+        filepath = [set+"Set/",set+ID]
+        hasDamageList = {"TB1":False,"TB2":False,"TB3":True,"TB4":True,"TB5":False,
+                "ZA1":False,"ZA2":False,"ZA3":True,"ZA4":True,"ZA5":False}
+        self.hasDamage = hasDamageList[str(set)+str(ID)]
+        #input(self.hasDamage)
+        before = Sample(filepath[0]+"Before/"+filepath[1]+".jpeg")
+        after = Sample(filepath[0]+"After/"+filepath[1]+".jpg")
+        self.correctImgBefore = before.photoCropAndAdjust()
+        self.correctImgAfter = after.photoCropAndAdjust()
 
-path = "ImagesNew"
-files = os.listdir(path)
-print(files)
-
-# files of intrest 
-filenames = [
-             "TB1","TB2","TB3","TB4","TB5",
-             ] # "MA1
-#filenames = ["MA5"]
-suffix = ["Front"]
-filetype = ".jpeg"
-
-coupon = []
-print("da")
-for file in filenames:
-    print(file)
-    front = Sample(file+" "+suffix[0]+filetype, mirrorNeeded=False)
-    #back = Sample(file+" "+suffix[1]+filetype, mirrorNeeded=True)
-    coupon = [front]#back]
-    data = []
-    thres = []
-    for item in coupon:
-        correctImg = item.photoCropAndAdjust()
-
-        item.getDifference()
+    def getDifference(self,show=False):
         
+        self.difference = cv2.subtract(self.correctImgBefore,self.correctImgAfter)
+        if show:
+            """plt.subplot(1,3,1)
+            plt.imshow(self.correctImgBefore)
+            plt.subplot(1,3,2)
+            plt.imshow(self.correctImgAfter)
+            plt.subplot(1,3,3)
+            plt.imshow(self.difference)
+            plt.show()"""
+            pass
+        return self.difference
+    
+    def thresholdImg(self):
+        ret,img = cv2.threshold(self.difference,0,255,cv2.THRESH_TOZERO+cv2.THRESH_OTSU)
+        contours, hierarchy = cv2.findContours(img, cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
+        self.mostCentralContour = self.find_most_central_contour(contours)
+        self.thresholdImg = img
+        """plt.subplot(1,3,1)
+        plt.imshow(img)
+        
+        plt.show()"""
 
-    #print(Fdata = front.data)
-    #plotFrontVsBack(data[0], data[1],other = thres)
+    def damageInfo(self):
+        differenceImg = self.difference
+        #input(type(differenceImg))
+        centralCont = self.mostCentralContour #Cx,Cy
+        M = cv2.moments(centralCont[0])
+        if M["m00"] != 0:
+            cx = int(M["m10"] / M["m00"])
+            cy = int(M["m01"] / M["m00"])
+        else:
+            cx, cy = 0, 0  # fallback if area is zero
+        centralPoint = [cx,cy]
+
+        scatter = []
+        #input(scatter)
+        for point in centralCont[0]:
+            #point = [x,y]
+            point = point[0]
+            #print(point, centralPoint)
+            vectorFromCenter = point-centralPoint
+            #print(scatter)
+            #input(vectorFromCenter)
+            scatter.append(vectorFromCenter)
+        scatter = np.asarray(scatter)
+        plt.subplot(1,2,1)
+        plt.plot(scatter[:,0],scatter[:,1])
+        plt.show()
+        hgroup = self.get_horizontal_by_y
+        print("hgroup",hgroup)
+        
+    def get_horizontal_by_y(self, contour, tolerance=2):
+        pts = contour[:, 0, :]
+        horizontal_groups = []
+
+        # Sort by y
+        pts_sorted = pts[np.argsort(pts[:, 1])]
+
+        current_group = [pts_sorted[0]]
+
+        for p in pts_sorted[1:]:
+            if abs(p[1] - current_group[-1][1]) <= tolerance:
+                current_group.append(p)
+            else:
+                if len(current_group) > 1:
+                    horizontal_groups.append(np.array(current_group))
+                current_group = [p]
+
+        if len(current_group) > 1:
+            horizontal_groups.append(np.array(current_group))
+
+        return horizontal_groups        
+
+
+    def getAbsorbedEnergy(self,set,ID):
+
+        m = 2.0   # kg
+        h = 1.31
+        v0 = np.sqrt(2*9.81*h)  # initial velocity (m/s)
+        filePath = "ImpactData/"+set+ID+".csv"
+        if filePath != "ImpactData/ZA1.csv":
+            df = pd.read_csv(filePath, skiprows=8,sep=" ")
+            df.columns = ["PointID","Time[ms]","Force[N]","Voltage"]
+            df = df[["Time[ms]","Force[N]"]]
+            
+            
+            impulse = np.trapezoid(df["Force[N]"],df["Time[ms]"])
+            dv = impulse / (m/1000)
+            v_final = v0 + dv
+            velocity = v0 + np.cumsum(np.diff(df["Time[ms]"], prepend=0) * df["Force[N]"]/m)
+            displacement = np.cumsum(velocity * np.diff(df["Time[ms]"], prepend=0))
+            work_done = np.trapezoid(df["Force[N]"], displacement)
+            print(work_done)
+            #plt.plot(work_done)
+            plt.show()
+            #input(df.head())
+
+    def find_most_central_contour(self,contours):
+
+        h, w = self.difference.shape
+        image_center = np.array([w/2, h/2])
+        min_dist = -1
+        central_contour = None
+
+        for cnt in contours:
+            
+            M = cv2.moments(cnt)
+            if M["m00"] != 0:  # avoid division by zero
+                cx = int(M["m10"] / M["m00"])
+                cy = int(M["m01"] / M["m00"])
+                centroid = np.array([cx, cy])
+
+                dist = np.linalg.norm(centroid - image_center)
+                area = cv2.contourArea(cnt)
+                #print(area)
+                areaThreshold = 5000
+                if dist < min_dist and area > areaThreshold:
+                    min_dist = dist
+                    central_contour = cnt
+                if min_dist == -1:
+                    min_dist = dist
+                    central_contour = cnt
+                    self.centralContourCenter = centroid
+            
+        #print(central_contour)
+        #print("area",cv2.contourArea(central_contour))
+        return central_contour, centroid
+
+class Set(object):
+    def __init__(self,set):
+        photoNumbers = ["1","2","3","4","5"]
+        coupons = []
+        for photo in photoNumbers:
+            coupons.append(Coupon(set,photo))
+        for coupon in coupons:
+            coupon.getDifference(show=True)
+            coupon.thresholdImg()
+            coupon.damageInfo()
+setNames = ["TB","ZA","MA","AS",]
+setNames = ["TB","ZA"]
+setList = []
+for set in setNames:
+    setList.append(Set(set)) #in a set is 5 coupons, in a coupon is a before and after and difference
