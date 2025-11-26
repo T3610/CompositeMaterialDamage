@@ -223,10 +223,11 @@ class Sample(object):
 
 class Coupon(object):
     def __init__(self,set,ID):
+        self.sample = set+ID
         filepath = [set+"Set/",set+ID]
-        hasDamageList = {"TB1":False,"TB2":False,"TB3":True,"TB4":True,"TB5":False,
+        hasExistingDamageList = {"TB1":False,"TB2":False,"TB3":True,"TB4":True,"TB5":False,
                 "ZA1":False,"ZA2":False,"ZA3":True,"ZA4":True,"ZA5":False}
-        self.hasDamage = hasDamageList[str(set)+str(ID)]
+        self.hasExistingDamage = hasExistingDamageList[str(set)+str(ID)]
         #input(self.hasDamage)
         before = Sample(filepath[0]+"Before/"+filepath[1]+".jpeg")
         after = Sample(filepath[0]+"After/"+filepath[1]+".jpg")
@@ -259,19 +260,19 @@ class Coupon(object):
 
     def damageInfo(self):
         differenceImg = self.difference
-        #input(type(differenceImg))
+        
         centralCont = self.mostCentralContour
-        M = cv2.moments(centralCont[0])
+        self.damageArea = cv2.contourArea(centralCont)
+        M = cv2.moments(centralCont)
         if M["m00"] != 0:
             cx = int(M["m10"] / M["m00"])
             cy = int(M["m01"] / M["m00"])
         else:
             cx, cy = 0, 0  # fallback if area is zero
         centralPoint = [cx,cy]
-
         scatter = []
         #input(scatter)
-        for point in centralCont[0]:
+        for point in centralCont:
             #point = [x,y]
             point = point[0]
             #print(point, centralPoint)
@@ -280,12 +281,63 @@ class Coupon(object):
             #input(vectorFromCenter)
             scatter.append(vectorFromCenter)
         scatter = np.asarray(scatter)
-        
-        print(self.scatter.shape)
-        plt.subplot(1,2,1)
+        self.scatter = scatter
+
+        """plt.subplot(1,2,1)
         plt.plot(scatter[:,0],scatter[:,1])
-        plt.show()
+        plt.show()"""
+
+        #y axis
+        TL = []
+        TR = []
+        BL = []
+        BR = []
+        
+        for pts in scatter:
+            #input(pts)
+            if pts[0] <= 0 and pts[1] > 0:
+                TL.append(pts)
+            elif pts[0] <= 0 and pts[1] <= 0:
+                BL.append(pts)
+            elif pts[0] > 0 and pts[1] >= 0:
+                TR.append(pts)
+            else:
+                BR.append(pts)
+        
+        TL = np.asarray(TL)
+        TR = np.asarray(TR)
+        BL = np.asarray(BL)
+        BR = np.asarray(BR)
+        N = 11
  
+    
+        width = {"TL":min(TL[:,0]),"TR":max(TR[:,0]),
+                 "BL":min(BL[:,0]),"BR":max(BR[:,0])}
+        truewidth = (abs(width["TL"])+width["TR"]+abs(width["BL"])+width["BR"])/2
+
+        height = {"TL":max(TL[:,1]),"TR":max(TR[:,1]),
+                 "BL":min(BL[:,1]),"BR":min(BR[:,1])}
+        trueheight = (abs(height["TL"])+abs(height["TR"])+abs(height["BL"])+abs(height["BR"]))/2
+
+        self.majorDim = {"Damage Width":truewidth,"Damage Height":trueheight}
+        #print(self.majorDim)
+        
+        """plt.subplot(2,2,1)
+        plt.title("TL:"+str(height["TL"]))
+        plt.plot(TL[:,0],TL[:,1])
+        plt.subplot(2,2,2)
+        plt.title("TR"+str(height["TR"]))
+        plt.plot(TR[:,0],TR[:,1])
+        plt.subplot(2,2,3)
+        plt.title("BL"+str(height["BL"]))
+        plt.plot(BL[:,0],BL[:,1])
+        plt.subplot(2,2,4)
+        plt.title("BR"+str(height["BR"]))
+        plt.plot(BR[:,0],BR[:,1])
+        plt.show()"""
+
+        return self.sample, truewidth, trueheight, self.damageArea*(1/400), self.hasExistingDamage
+
 
     def getAbsorbedEnergy(self,set,ID):
 
@@ -339,25 +391,30 @@ class Coupon(object):
             
         #print(central_contour)
         #print("area",cv2.contourArea(central_contour))
-        return central_contour, centroid
+        return central_contour
 
 class Set(object):
     def __init__(self,set):
         photoNumbers = ["1","2","3","4","5"]
         coupons = []
+        damageInfo = []
         for photo in photoNumbers:
-            coupons.append(Coupon(set,photo))
+            coup = Coupon(set,photo)
+            coupons.append(coup)
+            coup.getDifference(show=True)
+            coup.thresholdImg()
+            damageInfo.append(coup.damageInfo())
+        self.df = pd.DataFrame(damageInfo)
+        self.df.columns = ['Sample ID', 'Damage Width', 'Damage Height', "Total Area of Damage (mm^2)","Has Preexisting Damage"]
+        #print(df)               
 
-            damageCnts = []
-        for coupon in coupons:
-            coupon.getDifference(show=True)
-            coupon.thresholdImg()
-            coupon.damageInfo()
-            print(coupon.scatter)
-            #plt.plot(coupon.scatter[0],coupon.scatter[1])
-        plt.show()
+
 setNames = ["TB","ZA","MA","AS",]
 setNames = ["TB","ZA"]
 setList = []
 for set in setNames:
     setList.append(Set(set)) #in a set is 5 coupons, in a coupon is a before and after and difference
+
+damageDFs = [x.df for x in setList]
+damageInfoDF = pd.concat(damageDFs, ignore_index=True)
+print(damageInfoDF)
