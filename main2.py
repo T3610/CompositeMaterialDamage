@@ -260,7 +260,7 @@ class Coupon(object):
     def damageInfo(self):
         differenceImg = self.difference
         #input(type(differenceImg))
-        centralCont = self.mostCentralContour #Cx,Cy
+        centralCont = self.mostCentralContour
         M = cv2.moments(centralCont[0])
         if M["m00"] != 0:
             cx = int(M["m10"] / M["m00"])
@@ -280,34 +280,12 @@ class Coupon(object):
             #input(vectorFromCenter)
             scatter.append(vectorFromCenter)
         scatter = np.asarray(scatter)
+        
+        print(self.scatter.shape)
         plt.subplot(1,2,1)
         plt.plot(scatter[:,0],scatter[:,1])
         plt.show()
-        hgroup = self.get_horizontal_by_y
-        print("hgroup",hgroup)
-        
-    def get_horizontal_by_y(self, contour, tolerance=2):
-        pts = contour[:, 0, :]
-        horizontal_groups = []
-
-        # Sort by y
-        pts_sorted = pts[np.argsort(pts[:, 1])]
-
-        current_group = [pts_sorted[0]]
-
-        for p in pts_sorted[1:]:
-            if abs(p[1] - current_group[-1][1]) <= tolerance:
-                current_group.append(p)
-            else:
-                if len(current_group) > 1:
-                    horizontal_groups.append(np.array(current_group))
-                current_group = [p]
-
-        if len(current_group) > 1:
-            horizontal_groups.append(np.array(current_group))
-
-        return horizontal_groups        
-
+ 
 
     def getAbsorbedEnergy(self,set,ID):
 
@@ -369,10 +347,15 @@ class Set(object):
         coupons = []
         for photo in photoNumbers:
             coupons.append(Coupon(set,photo))
+
+            damageCnts = []
         for coupon in coupons:
             coupon.getDifference(show=True)
             coupon.thresholdImg()
             coupon.damageInfo()
+            print(coupon.scatter)
+            #plt.plot(coupon.scatter[0],coupon.scatter[1])
+        plt.show()
 setNames = ["TB","ZA","MA","AS",]
 setNames = ["TB","ZA"]
 setList = []
