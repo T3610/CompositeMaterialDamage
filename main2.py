@@ -5,7 +5,7 @@ from matplotlib import pyplot as plt
 import os
 import pandas as pd
 from scipy import signal
-
+import math
 
 data = np.genfromtxt("test.csv",delimiter=",")
 #data = data[1:,:]
@@ -285,8 +285,8 @@ class Coupon(object):
 
         """plt.subplot(1,2,1)
         plt.plot(scatter[:,0],scatter[:,1])
-        plt.show()"""
-
+        plt.show()
+        """
         #y axis
         TL = []
         TR = []
@@ -309,7 +309,7 @@ class Coupon(object):
         BL = np.asarray(BL)
         BR = np.asarray(BR)
         N = 11
- 
+
     
         width = {"TL":min(TL[:,0]),"TR":max(TR[:,0]),
                  "BL":min(BL[:,0]),"BR":max(BR[:,0])}
@@ -321,22 +321,72 @@ class Coupon(object):
 
         self.majorDim = {"Damage Width":truewidth,"Damage Height":trueheight}
         #print(self.majorDim)
-        
+        nearestPointTL = min(TL, key=lambda p: math.hypot(p[0], p[1]))
+        nearestPointTR = min(TR, key=lambda p: math.hypot(p[0], p[1]))
+        nearestPointBL = min(BL, key=lambda p: math.hypot(p[0], p[1]))
+        nearestPointBR = min(BR, key=lambda p: math.hypot(p[0], p[1]))
+        nearestPoints = [nearestPointTL,nearestPointTR,nearestPointBL,nearestPointBR]
+
         """plt.subplot(2,2,1)
         plt.title("TL:"+str(height["TL"]))
         plt.plot(TL[:,0],TL[:,1])
+        plt.plot(nearestPointTL[0],nearestPointTL[1],'ro')
         plt.subplot(2,2,2)
         plt.title("TR"+str(height["TR"]))
         plt.plot(TR[:,0],TR[:,1])
+        plt.plot(nearestPointTR[0],nearestPointTR[1],'ro')
+
         plt.subplot(2,2,3)
         plt.title("BL"+str(height["BL"]))
         plt.plot(BL[:,0],BL[:,1])
+        plt.plot(nearestPointBL[0],nearestPointBL[1],'ro')
+
         plt.subplot(2,2,4)
         plt.title("BR"+str(height["BR"]))
         plt.plot(BR[:,0],BR[:,1])
-        plt.show()"""
+        plt.plot(nearestPointBR[0],nearestPointBR[1],'ro')
 
-        return self.sample, truewidth, trueheight, self.damageArea*(1/400), self.hasExistingDamage
+        plt.show()"""
+        extraData = self.extraCrossData([TL,TR,BL,BR],nearestPoints)
+
+        return self.sample, truewidth, trueheight, self.damageArea*(1/400), self.hasExistingDamage, extraData[0][0], extraData[0][1], extraData[1][0], extraData[1][1]
+
+    def extraCrossData(self,data,nearestPoints):
+        armLength = []
+        armWidth = []
+        for ix in range(0,len(data)):
+            roundData = data[ix]
+            roundData = sorted(roundData, key=lambda x:x[1])
+            nearest = nearestPoints[ix]
+            nearestFound = False
+            ydata = []
+            xdata = []
+            for x in roundData:
+                #print("x", roundData)
+                if nearestFound:
+                    ydata.append(x)
+                    
+                else:
+                    xdata.append(x)
+                if x[0] == nearest[0] and x[1]== nearest[1]:
+                    nearestFound=True 
+
+            ydata = np.asarray(ydata)
+            xdata = np.asarray(xdata)
+            """plt.plot(ydata[:,0],ydata[:,1],color = "red")
+            plt.plot(xdata[:,0],xdata[:,1], color = "blue")
+            plt.show()"""
+            armLength.append(np.ptp(ydata[:,1])) # ,np.ptp(xdata[:,0])
+            armWidth.append(np.ptp(xdata[:,0])) # ,np.ptp(xdata[:,1])]
+        print(armLength)
+       
+        averageArmLength = [(armLength[0]+armLength[1])/2,(armLength[2]+armLength[3])/2]
+        averageArmWidth = [(armWidth[0]+armWidth[1])/2,(armWidth[2]+armWidth[3])/2]
+        # Varible names not great look at excel spreadsheet for more info
+        return averageArmLength,averageArmWidth
+
+        
+        
 
 
     def getAbsorbedEnergy(self,set,ID):
@@ -405,7 +455,7 @@ class Set(object):
             coup.thresholdImg()
             damageInfo.append(coup.damageInfo())
         self.df = pd.DataFrame(damageInfo)
-        self.df.columns = ['Sample ID', 'Damage Width', 'Damage Height', "Total Area of Damage (mm^2)","Has Preexisting Damage"]
+        self.df.columns = ['Sample ID', 'Damage Width', 'Damage Height', "Total Area of Damage (mm^2)","Has Preexisting Damage","Vert Arm Length", "Vert Arm Width", "Horizontal Arm Length", "Horizontal Arm Width"]
         #print(df)               
 
 
@@ -417,4 +467,5 @@ for set in setNames:
 
 damageDFs = [x.df for x in setList]
 damageInfoDF = pd.concat(damageDFs, ignore_index=True)
+damageInfoDF.to_excel("DamageData.xlsx")
 print(damageInfoDF)
