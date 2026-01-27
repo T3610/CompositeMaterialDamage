@@ -7,13 +7,6 @@ import pandas as pd
 from scipy import signal
 import math
 
-data = np.genfromtxt("test.csv",delimiter=",")
-#data = data[1:,:]
-#print(data)
-
-
-
-
 # 0 is no damage
 # 254 is hole / no material
 #255 is area outside coupon
@@ -26,7 +19,6 @@ class Sample(object):
         self.doShowImg = False
         
         self.ImgFilePath = filePath
-        self.correctedFilePath = "corrected/" + filePath
 
     def photoCropAndAdjust(self):
         
@@ -35,7 +27,8 @@ class Sample(object):
         #self.correctedImg = self.removeGradient(correctedImg)
 
         correctedImg = self.correctedImg
-        """plt.subplot(1, 2, 1)
+        """plt.clf()
+        plt.subplot(1, 2, 1)
         plt.title("Image of Sample")
         plt.imshow(self.correctedImg)
         plt.show()"""
@@ -68,15 +61,20 @@ class Sample(object):
         
     def furtherCrop(self,imgPath):
         
-        threshold = 170
+        threshold = 175
         img = cv2.imread(imgPath)
-        imgray = cv2.cvtColor(img, cv2.COLOR_RGB2GRAY)
-        
-        ret, thresh = cv2.threshold(imgray, threshold, 255,cv2.THRESH_BINARY) # scource, threshold value, max value,type
-        contourInfo = self.getCoupnEdgeContours(imgray,thresh)
-        contoursEdge, maxContourLengthIndex, contour = contourInfo
-        image_contours1 = cv2.drawContours(img.copy(), contoursEdge[maxContourLengthIndex], -1, (0,0,255), 30, cv2.LINE_AA)
 
+        imgray = cv2.cvtColor(img, cv2.COLOR_RGB2GRAY)
+        # plt.imshow(imgray)
+        # plt.show()
+        ret, thresh = cv2.threshold(imgray, threshold, 255,cv2.THRESH_BINARY) # scource, threshold value, max value,type
+        # plt.imshow(thresh)
+        # plt.show()
+        contour = self.getCoupnEdgeContours(imgray,thresh)
+        
+        image_contours1 = cv2.drawContours(imgray.copy(), contour, -1, (0,0,255), 30, cv2.LINE_AA)
+        # plt.imshow(image_contours1)
+        # plt.show()
         epsilon = 0.005*cv2.arcLength(contour,True)
         approx = cv2.approxPolyDP(contour,epsilon,True)
         simpCnt = cv2.drawContours(img.copy(), [approx], 0, (255,255,255), 3)
@@ -213,9 +211,10 @@ class Sample(object):
                 maxContourLengthIndex = x
         contour = contours1[maxContourLengthIndex]
         image_contours1 = cv2.drawContours(img.copy(), contours1[maxContourLengthIndex], -1, (0,255,0), 10, cv2.LINE_AA)
-        return contours1, maxContourLengthIndex, contour
+        return contour
 
     def pltImgShow(self):
+        self.doShowImg = False
         if self.doShowImg:
             plt.show()
         else:
@@ -226,7 +225,9 @@ class Coupon(object):
         self.sample = set+ID
         filepath = [set+"Set/",set+ID]
         hasExistingDamageList = {"TB1":False,"TB2":False,"TB3":True,"TB4":True,"TB5":False,
-                "ZA1":False,"ZA2":False,"ZA3":True,"ZA4":True,"ZA5":False}
+                "ZA1":False,"ZA2":False,"ZA3":True,"ZA4":True,"ZA5":False,
+                "AS1":False,"AS2":False,"AS3":False,"AS4":True,"AS5":True,
+                "MA1":False,"MA2":True,"MA3":True,"MA4":True,"MA5":True}
         self.hasExistingDamage = hasExistingDamageList[str(set)+str(ID)]
         #input(self.hasDamage)
         before = Sample(filepath[0]+"Before/"+filepath[1]+".jpeg")
@@ -237,26 +238,34 @@ class Coupon(object):
     def getDifference(self,show=False):
         
         self.difference = cv2.subtract(self.correctImgBefore,self.correctImgAfter)
+        show = False
         if show:
-            """plt.subplot(1,3,1)
+            plt.subplot(1,3,1)
             plt.imshow(self.correctImgBefore)
             plt.subplot(1,3,2)
             plt.imshow(self.correctImgAfter)
             plt.subplot(1,3,3)
             plt.imshow(self.difference)
-            plt.show()"""
+            plt.show()
             pass
         return self.difference
     
     def thresholdImg(self):
-        ret,img = cv2.threshold(self.difference,0,255,cv2.THRESH_TOZERO+cv2.THRESH_OTSU)
-        contours, hierarchy = cv2.findContours(img, cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
-        self.mostCentralContour = self.find_most_central_contour(contours)
-        self.thresholdImg = img
-        """plt.subplot(1,3,1)
-        plt.imshow(img)
-        
-        plt.show()"""
+        if self.sample == "TB3":
+            #self.difference = cv2.GaussianBlur(self.difference,(5,5),5)
+            ret, img = cv2.threshold(self.difference,50,255,cv2.THRESH_TOZERO)
+
+        elif self.sample == "TB4":
+            ret, img = cv2.threshold(self.difference,55,255,cv2.THRESH_TOZERO)
+        else:
+            ret,img = cv2.threshold(self.difference,0,255,cv2.THRESH_TOZERO+cv2.THRESH_OTSU)
+        self.find_most_central_contour(img)
+    
+        self.mostCentralContour = self.central_contour
+        area = cv2.contourArea(self.mostCentralContour)
+        contouredImage = cv2.drawContours(self.correctImgAfter.copy(), [self.mostCentralContour], 0, (255,255,255), 20)
+        self.thresholdedImg = img   
+        self.contouredImage = contouredImage
 
     def damageInfo(self):
         differenceImg = self.difference
@@ -264,12 +273,14 @@ class Coupon(object):
         centralCont = self.mostCentralContour
         self.damageArea = cv2.contourArea(centralCont)
         M = cv2.moments(centralCont)
+        self.center = M
         if M["m00"] != 0:
             cx = int(M["m10"] / M["m00"])
             cy = int(M["m01"] / M["m00"])
         else:
             cx, cy = 0, 0  # fallback if area is zero
         centralPoint = [cx,cy]
+        self.centralPoint = centralPoint
         scatter = []
         #input(scatter)
         for point in centralCont:
@@ -285,8 +296,8 @@ class Coupon(object):
 
         """plt.subplot(1,2,1)
         plt.plot(scatter[:,0],scatter[:,1])
-        plt.show()
-        """
+        plt.show()"""
+        
         #y axis
         TL = []
         TR = []
@@ -313,11 +324,11 @@ class Coupon(object):
     
         width = {"TL":min(TL[:,0]),"TR":max(TR[:,0]),
                  "BL":min(BL[:,0]),"BR":max(BR[:,0])}
-        truewidth = (abs(width["TL"])+width["TR"]+abs(width["BL"])+width["BR"])/2
+        truewidth = abs(np.min(self.mostCentralContour[:, :, 0]) - np.max(self.mostCentralContour[:, :, 0]))
 
         height = {"TL":max(TL[:,1]),"TR":max(TR[:,1]),
                  "BL":min(BL[:,1]),"BR":min(BR[:,1])}
-        trueheight = (abs(height["TL"])+abs(height["TR"])+abs(height["BL"])+abs(height["BR"]))/2
+        trueheight = abs(np.min(self.mostCentralContour[:, :, 1]) - np.max(self.mostCentralContour[:, :, 1]))
 
         self.majorDim = {"Damage Width":truewidth,"Damage Height":trueheight}
         #print(self.majorDim)
@@ -326,8 +337,8 @@ class Coupon(object):
         nearestPointBL = min(BL, key=lambda p: math.hypot(p[0], p[1]))
         nearestPointBR = min(BR, key=lambda p: math.hypot(p[0], p[1]))
         nearestPoints = [nearestPointTL,nearestPointTR,nearestPointBL,nearestPointBR]
-
-        """plt.subplot(2,2,1)
+        """
+        plt.subplot(2,2,1)
         plt.title("TL:"+str(height["TL"]))
         plt.plot(TL[:,0],TL[:,1])
         plt.plot(nearestPointTL[0],nearestPointTL[1],'ro')
@@ -346,10 +357,11 @@ class Coupon(object):
         plt.plot(BR[:,0],BR[:,1])
         plt.plot(nearestPointBR[0],nearestPointBR[1],'ro')
 
-        plt.show()"""
+        plt.show()
+        """
         extraData = self.extraCrossData([TL,TR,BL,BR],nearestPoints)
 
-        return self.sample, truewidth, trueheight, self.damageArea*(1/400), self.hasExistingDamage, extraData[0][0], extraData[0][1], extraData[1][0], extraData[1][1]
+        return self.sample, truewidth/20, trueheight/20, self.damageArea*(1/400), self.hasExistingDamage, extraData[0][0]/20, extraData[0][1]/20, extraData[1][0]/20, extraData[1][1]/20
 
     def extraCrossData(self,data,nearestPoints):
         armLength = []
@@ -378,47 +390,32 @@ class Coupon(object):
             plt.show()"""
             armLength.append(np.ptp(ydata[:,1])) # ,np.ptp(xdata[:,0])
             armWidth.append(np.ptp(xdata[:,0])) # ,np.ptp(xdata[:,1])]
-        print(armLength)
+        #print(armLength)
        
         averageArmLength = [(armLength[0]+armLength[1])/2,(armLength[2]+armLength[3])/2]
         averageArmWidth = [(armWidth[0]+armWidth[1])/2,(armWidth[2]+armWidth[3])/2]
         # Varible names not great look at excel spreadsheet for more info
         return averageArmLength,averageArmWidth
 
-        
-        
+    def find_most_central_contour(self,img):
+    
+    
+        contours, hierarchy = cv2.findContours(img, cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
+        cntImg = cv2.drawContours(img.copy(), contours, -1, (255,0,0), 3)
 
+        colours = plt.cm.tab20(np.linspace(0, 1, len(contours)))
+        #input(colours)
+        for i, cnt in enumerate(contours):
+            # Ensure shape is always (N, 2)
+            cnt = cnt.reshape(-1, 2)
 
-    def getAbsorbedEnergy(self,set,ID):
-
-        m = 2.0   # kg
-        h = 1.31
-        v0 = np.sqrt(2*9.81*h)  # initial velocity (m/s)
-        filePath = "ImpactData/"+set+ID+".csv"
-        if filePath != "ImpactData/ZA1.csv":
-            df = pd.read_csv(filePath, skiprows=8,sep=" ")
-            df.columns = ["PointID","Time[ms]","Force[N]","Voltage"]
-            df = df[["Time[ms]","Force[N]"]]
-            
-            
-            impulse = np.trapezoid(df["Force[N]"],df["Time[ms]"])
-            dv = impulse / (m/1000)
-            v_final = v0 + dv
-            velocity = v0 + np.cumsum(np.diff(df["Time[ms]"], prepend=0) * df["Force[N]"]/m)
-            displacement = np.cumsum(velocity * np.diff(df["Time[ms]"], prepend=0))
-            work_done = np.trapezoid(df["Force[N]"], displacement)
-            print(work_done)
-            #plt.plot(work_done)
-            plt.show()
-            #input(df.head())
-
-    def find_most_central_contour(self,contours):
+            x = cnt[:, 0]
+            y = cnt[:, 1]
 
         h, w = self.difference.shape
         image_center = np.array([w/2, h/2])
         min_dist = -1
         central_contour = None
-
         for cnt in contours:
             
             M = cv2.moments(cnt)
@@ -431,41 +428,126 @@ class Coupon(object):
                 area = cv2.contourArea(cnt)
                 #print(area)
                 areaThreshold = 5000
-                if dist < min_dist and area > areaThreshold:
+                
+                #print(area)
+            
+                if dist < min_dist and areaThreshold <= area:
                     min_dist = dist
-                    central_contour = cnt
+                    self.central_contour = cnt
                 if min_dist == -1:
                     min_dist = dist
-                    central_contour = cnt
-                    self.centralContourCenter = centroid
+                    self.central_contour = cnt
+                    centralContourCenter = centroid
             
         #print(central_contour)
         #print("area",cv2.contourArea(central_contour))
-        return central_contour
+        
+    def plots(self,data):
+
+        # Plot of before, after and the contoured damage
+        fig, ax = plt.subplots(nrows=1, ncols=3, sharex=True)
+        ax[0].imshow(self.correctImgBefore)
+        ax[0].set_title("Before Impact")
+        ax[0].set_xticks([])
+        ax[0].set_yticks([])
+
+        ax[1].imshow(self.correctImgAfter)
+        ax[1].set_title("After Impact")
+        ax[1].set_xticks([])
+        ax[1].set_yticks([])
+        ax[2].imshow(self.contouredImage)
+        ax[2].set_title("Detected Damage")
+        ax[2].set_xticks([])
+        ax[2].set_yticks([])
+        #plt.show()
+        plt.tight_layout()
+        plt.savefig("InterrimReport/ImgProccess/"+self.sample+".jpeg",dpi=300)
+        plt.show()
+        plt.clf()
+        #Plot of damage scatter
+
+        fig, ax = plt.subplots(1, 1, figsize=(8, 8))
+
+        plt.imshow(self.contouredImage)
+        plt.plot(self.centralPoint[0],self.centralPoint[1],'x',label="Calculated Center of Impact",color="red")
+        x_min = np.min(self.mostCentralContour[:, :, 0])
+        x_max = np.max(self.mostCentralContour[:, :, 0])
+        y_min = np.min(self.mostCentralContour[:, :, 1])
+        y_max = np.max(self.mostCentralContour[:, :, 1])
+
+        ax.axvline(x=x_min, color='blue', linestyle='--', label='Damage Width Extremes')
+        ax.axvline(x=x_max, color='blue', linestyle='--')
+        ax.annotate(
+            "", xy=(x_min, 50), xytext=(x_max, 50),
+            arrowprops=dict(arrowstyle='<->', color='black')
+        )
+        plt.text(
+            (x_min + x_max) / 2, 250,       # Position (middle of X, slightly above arrow)
+            r'$D_w$',    # The label
+            ha='center', va='bottom',       # Center the text
+            fontsize=10, 
+        )
+
+        ax.axhline(y=y_min, color='blue', linestyle='--', label='Damage Height Extremes')
+        ax.axhline(y=y_max, color='blue', linestyle='--')
+        ax.annotate(
+            "", xy=(1800,y_min), xytext=(1800,y_max),
+            arrowprops=dict(arrowstyle='<->', color='black')
+        )
+        ax.text(
+            1900,  1500,       # Position (middle of X, slightly above arrow)
+            r'$D_h$',    # The label
+            ha='center', va='bottom',       # Center the text
+            fontsize=10
+        )
+
+
+        textstr = '\n'.join((
+        r'$D_w = %.2f$' % (data[1],),
+        r'$D_h = %.2f$' % (data[2], ),
+        "X = Center of damage",
+        "Area = %.2f mm²" % (data[3],),
+        ))
+        props = dict(boxstyle='round', facecolor='wheat', alpha=1)
+        ax.text(0.05, 0.05, textstr, fontsize=14, transform = ax.transAxes,
+        va='bottom',ha='left', bbox=props)
+
+
+        plt.tight_layout()
+        plt.savefig("InterrimReport/QuantifiedDamage/"+self.sample+".jpeg",dpi=300)
+        plt.show()
+        plt.clf()
+        
+        
 
 class Set(object):
     def __init__(self,set):
         photoNumbers = ["1","2","3","4","5"]
+        #photoNumbers = ["4"]
         coupons = []
         damageInfo = []
         for photo in photoNumbers:
             coup = Coupon(set,photo)
             coupons.append(coup)
-            coup.getDifference(show=True)
+            coup.getDifference(show=False)
             coup.thresholdImg()
-            damageInfo.append(coup.damageInfo())
+            couponDamage = coup.damageInfo()
+            damageInfo.append(couponDamage)
+            coup.plots(couponDamage)
+            print("Completed Coupon:", set+photo)
         self.df = pd.DataFrame(damageInfo)
-        self.df.columns = ['Sample ID', 'Damage Width', 'Damage Height', "Total Area of Damage (mm^2)","Has Preexisting Damage","Vert Arm Length", "Vert Arm Width", "Horizontal Arm Length", "Horizontal Arm Width"]
+        self.df.columns = ['ID', 'Damage Width', 'Damage Height', "Total Area of Damage (mm^2)","Has Preexisting Damage","Vert Arm Length", "Vert Arm Width", "Horizontal Arm Length", "Horizontal Arm Width"]
         #print(df)               
 
 
 setNames = ["TB","ZA","MA","AS",]
-setNames = ["TB","ZA"]
+setNames = ["MA"]
 setList = []
 for set in setNames:
     setList.append(Set(set)) #in a set is 5 coupons, in a coupon is a before and after and difference
-
+    print("Completed Set:", set)
+    plt.close('all')
 damageDFs = [x.df for x in setList]
 damageInfoDF = pd.concat(damageDFs, ignore_index=True)
-damageInfoDF.to_excel("DamageData.xlsx")
+damageInfoDF.to_csv("DamageData.csv",index=False)
 print(damageInfoDF)
